@@ -1,7 +1,13 @@
+use alloy_consensus::{SignableTransaction, TxEnvelope, TxLegacy};
+use alloy_network::TxSignerSync;
+use alloy_primitives::TxKind;
+use alloy_rlp::Encodable;
+use alloy_rpc_types::TransactionRequest;
+use alloy_signer_wallet::LocalWallet;
 use alloy_sol_types::{sol, SolCall, SolValue};
 use kinode_process_lib::{
     await_message, call_init,
-    eth::{Address as EthAddress, Provider, TransactionInput, TransactionRequest, U256},
+    eth::{Address as EthAddress, Provider, TransactionInput, U256},
     println, Address, Response,
 };
 use serde::{Deserialize, Serialize};
@@ -26,7 +32,7 @@ sol! {
     }
 }
 
-pub const COUNTER_ADDRESS: &str = "0x1234567890123456789012345678901234567890";
+pub const COUNTER_ADDRESS: &str = "0x610178dA211FEF7D417bC0e6FeD39F05609AD788";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum CounterAction {
@@ -34,7 +40,7 @@ pub enum CounterAction {
     Read,
 }
 
-fn handle_message(_our: &Address, provider: &Provider) -> anyhow::Result<()> {
+fn handle_message(_our: &Address, provider: &Provider, wallet: &LocalWallet) -> anyhow::Result<()> {
     let message = await_message()?;
 
     if !message.is_request() {
@@ -45,7 +51,30 @@ fn handle_message(_our: &Address, provider: &Provider) -> anyhow::Result<()> {
 
     match action {
         CounterAction::Increment => {
-            println!("this next!");
+            let increment = Counter::incrementCall {}.abi_encode();
+
+            let nonce = provider
+                .get_transaction_count(wallet.address(), None)
+                .unwrap()
+                .to::<u64>();
+            let mut tx = TxLegacy {
+                chain_id: Some(31337),
+                nonce: nonce,
+                to: TxKind::Call(EthAddress::from_str(COUNTER_ADDRESS).unwrap()),
+                gas_limit: 100000,
+                gas_price: 100000000,
+                input: increment.into(),
+                ..Default::default()
+            };
+
+            let sig = wallet.sign_transaction_sync(&mut tx)?;
+            let signed = TxEnvelope::from(tx.into_signed(sig));
+
+            let mut buf = vec![];
+            signed.encode(&mut buf);
+
+            let tx_hash = provider.send_raw_transaction(buf.into());
+            println!("tx_hash: {:?}", tx_hash);
         }
         CounterAction::Read => {
             let _count = read(&provider);
@@ -64,14 +93,14 @@ fn read(provider: &Provider) -> anyhow::Result<U256> {
     let count = Counter::numberCall {}.abi_encode();
 
     let tx = TransactionRequest::default()
-        .to(Some(counter_address))
+        .to(counter_address)
         .input(TransactionInput::new(count.into()));
     let x = provider.call(tx, None);
 
     match x {
         Ok(b) => {
             let number = U256::abi_decode(&b, false).unwrap();
-            println!("current count: {:?}", number);
+            println!("current count: {:?}", number.to::<u64>());
             Ok(number)
         }
         Err(e) => {
@@ -89,8 +118,12 @@ fn init(our: Address) {
 
     let _count = read(&provider);
 
+    let wallet =
+        LocalWallet::from_str("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+            .unwrap();
+
     loop {
-        match handle_message(&our, &provider) {
+        match handle_message(&our, &provider, &wallet) {
             Ok(()) => {}
             Err(e) => {
                 println!("error: {:?}", e);
