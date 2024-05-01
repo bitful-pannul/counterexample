@@ -1,6 +1,7 @@
 use kinode_process_lib::{await_message, call_init, eth::{Address as EthAddress, Provider, TransactionInput, TransactionRequest, U256}, println, Address, Response};
 use alloy_sol_types::{sol, SolCall, SolValue};
 use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 
 wit_bindgen::generate!({
     path: "wit",
@@ -21,16 +22,32 @@ sol! {
     }
 }
 
+pub const COUNTER_ADDRESS: &str = "0x1234567890123456789012345678901234567890";
 
-fn handle_message(_our: &Address) -> anyhow::Result<()> {
+#[derive(Debug, Deserialize, Serialize)]
+pub enum CounterAction {
+    Increment,
+    Read,
+}
+
+fn handle_message(_our: &Address, provider: &Provider) -> anyhow::Result<()> {
     let message = await_message()?;
 
     if !message.is_request() {
         return Err(anyhow::anyhow!("unexpected Response: {:?}", message));
     }
 
-    let body: serde_json::Value = serde_json::from_slice(message.body())?;
-    println!("got {body:?}");
+    let action: CounterAction = serde_json::from_slice(message.body())?;
+
+    match action {
+        CounterAction::Increment => {
+            println!("this next!");
+        }
+        CounterAction::Read => {
+            let _count = read(&provider);
+        }
+    }
+
     Response::new()
         .body(serde_json::to_vec(&serde_json::json!("Ack")).unwrap())
         .send()
@@ -38,13 +55,8 @@ fn handle_message(_our: &Address) -> anyhow::Result<()> {
     Ok(())
 }
 
-call_init!(init);
-fn init(our: Address) {
-    println!("begin");
-
-    let counter_address = EthAddress::from_str("0x1234567890123456789012345678901234567890").unwrap();
-
-    let provider = Provider::new(31337, 5);
+fn read(provider: &Provider) -> anyhow::Result<U256> {
+    let counter_address = EthAddress::from_str(COUNTER_ADDRESS).unwrap();
     let count = Counter::numberCall {}.abi_encode();
 
     let tx = TransactionRequest::default()
@@ -55,15 +67,26 @@ fn init(our: Address) {
     match x {
         Ok(b) => {
             let number = U256::abi_decode(&b, false).unwrap();
-            println!("initial count: {:?}", number);
+            println!("current count: {:?}", number);
+            Ok(number)
         }
         Err(e) => {
-            println!("error getting initial count: {:?}", e);
+            println!("error getting current count: {:?}", e);
+            Err(anyhow::anyhow!("error getting current count: {:?}", e))
         }
     }
+}
+
+call_init!(init);
+fn init(our: Address) {
+    println!("begin");
+
+    let provider = Provider::new(31337, 5);
+
+    let _count = read(&provider);
 
     loop {
-        match handle_message(&our) {
+        match handle_message(&our, &provider) {
             Ok(()) => {}
             Err(e) => {
                 println!("error: {:?}", e);
