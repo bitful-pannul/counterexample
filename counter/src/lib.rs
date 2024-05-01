@@ -1,7 +1,11 @@
-use kinode_process_lib::{await_message, call_init, eth::{Address as EthAddress, Provider, TransactionInput, TransactionRequest, U256}, println, Address, Response};
 use alloy_sol_types::{sol, SolCall, SolValue};
-use std::str::FromStr;
+use kinode_process_lib::{
+    await_message, call_init,
+    eth::{Address as EthAddress, Provider, TransactionInput, TransactionRequest, U256},
+    println, Address, Response,
+};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 wit_bindgen::generate!({
     path: "wit",
@@ -11,11 +15,11 @@ wit_bindgen::generate!({
 sol! {
     contract Counter {
         uint256 public number;
-    
+
         function setNumber(uint256 newNumber) public {
             number = newNumber;
         }
-    
+
         function increment() public {
             number++;
         }
